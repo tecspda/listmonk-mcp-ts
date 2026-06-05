@@ -1,0 +1,21 @@
+{
+  "name": "listmonk-mcp-ts",
+  "version": "0.1.0",
+  "description": "Listmonk MCP server for Bun, TypeScript implementation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun run --watch src/index.ts",
+    "check": "bun exec tsc"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.3",
+    "dotenv": "^16.4.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "bun-types": "^1.1.38",
+    "typescript": "^5.5.4"
+  }
+}
