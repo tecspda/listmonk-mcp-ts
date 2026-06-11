@@ -773,6 +773,50 @@ server.tool(
 );
 
 server.tool(
+  "create_template_from_file",
+  "Create a new template whose HTML body is read from a local file path (avoids passing large bodies inline)",
+  {
+    name: z.string().describe("Template name"),
+    file_path: z.string().describe("Absolute path to a file containing the template HTML body"),
+    type: z.string().default("campaign").describe("Template type: 'campaign' or 'tx' (transactional)"),
+    is_default: z.boolean().default(false).describe("Whether this is default"),
+    subject: z.string().optional().describe("Subject line (required for 'tx' transactional templates)"),
+  },
+  async ({ name, file_path, type, is_default, subject }): Promise<ToolResult> =>
+    safeResponse(async () => {
+      const { readFile } = await import("node:fs/promises");
+      const body = await readFile(file_path, "utf8");
+      const result = await client.createTemplate(name, body, type, is_default, subject);
+      const template = pickData(result);
+      return `Successfully created template '${name}' (ID: ${template.id || "unknown"}) from ${file_path} (${body.length} bytes)`;
+    }),
+);
+
+server.tool(
+  "update_template_from_file",
+  "Update an existing template, reading its HTML body from a local file path (avoids passing large bodies inline)",
+  {
+    template_id: z.number().positive().describe("Template ID"),
+    file_path: z.string().describe("Absolute path to a file containing the template HTML body"),
+    name: z.string().optional().describe("Template name"),
+    is_default: z.boolean().optional().describe("Default template flag"),
+    subject: z.string().optional().describe("Subject line (required for 'tx' transactional templates)"),
+  },
+  async ({ template_id, file_path, name, is_default, subject }): Promise<ToolResult> =>
+    safeResponse(async () => {
+      const { readFile } = await import("node:fs/promises");
+      const body = await readFile(file_path, "utf8");
+      await client.updateTemplate(template_id, {
+        body,
+        ...(name ? { name } : {}),
+        ...(is_default !== undefined ? { isDefault: is_default } : {}),
+        ...(subject !== undefined ? { subject } : {}),
+      });
+      return `Successfully updated template ${template_id} from ${file_path} (${body.length} bytes)`;
+    }),
+);
+
+server.tool(
   "delete_template",
   "Delete a template",
   { template_id: z.number().positive().describe("Template ID") },
