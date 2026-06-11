@@ -738,12 +738,13 @@ server.tool(
   {
     name: z.string().describe("Template name"),
     body: z.string().describe("Template HTML body"),
-    type: z.string().default("campaign").describe("Template type"),
+    type: z.string().default("campaign").describe("Template type: 'campaign' or 'tx' (transactional)"),
     is_default: z.boolean().default(false).describe("Whether this is default"),
+    subject: z.string().optional().describe("Subject line (required for 'tx' transactional templates)"),
   },
-  async ({ name, body, type, is_default }): Promise<ToolResult> =>
+  async ({ name, body, type, is_default, subject }): Promise<ToolResult> =>
     safeResponse(async () => {
-      const result = await client.createTemplate(name, body, type, is_default);
+      const result = await client.createTemplate(name, body, type, is_default, subject);
       const template = pickData(result);
       return `Successfully created template '${name}' (ID: ${template.id || "unknown"})`;
     }),
@@ -757,13 +758,15 @@ server.tool(
     name: z.string().optional().describe("Template name"),
     body: z.string().optional().describe("Template body"),
     is_default: z.boolean().optional().describe("Default template flag"),
+    subject: z.string().optional().describe("Subject line (required for 'tx' transactional templates)"),
   },
-  async ({ template_id, name, body, is_default }): Promise<ToolResult> =>
+  async ({ template_id, name, body, is_default, subject }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.updateTemplate(template_id, {
         ...(name ? { name } : {}),
         ...(body ? { body } : {}),
         ...(is_default !== undefined ? { isDefault: is_default } : {}),
+        ...(subject !== undefined ? { subject } : {}),
       });
       return `Successfully updated template ${template_id}`;
     }),

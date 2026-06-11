@@ -370,6 +370,7 @@ export class ListmonkClient {
     body: string,
     type = "campaign",
     isDefault = false,
+    subject?: string,
   ): Promise<Record<string, JsonValue>> {
     return this.request("POST", "/api/templates", {
       json: {
@@ -377,6 +378,8 @@ export class ListmonkClient {
         body,
         type,
         is_default: isDefault,
+        // tx-templates require a subject; listmonk returns 400 without it
+        ...(subject !== undefined ? { subject } : {}),
       },
     });
   }
@@ -387,19 +390,32 @@ export class ListmonkClient {
       name?: string;
       body?: string;
       isDefault?: boolean;
+      subject?: string;
     },
   ): Promise<Record<string, JsonValue>> {
-    if (!payload.body && !payload.name && payload.isDefault === undefined) {
+    if (
+      !payload.body &&
+      !payload.name &&
+      payload.isDefault === undefined &&
+      payload.subject === undefined
+    ) {
       const current = await this.getTemplate(templateId);
       const currentData = (current.data as Record<string, JsonValue>) ?? {};
       payload = {
         name: (currentData.name as string | undefined),
         body: (currentData.body as string | undefined),
         isDefault: Boolean(currentData.is_default),
+        subject: (currentData.subject as string | undefined),
       };
     }
 
-    return this.request("PUT", `/api/templates/${templateId}`, { json: payload });
+    const { isDefault, ...rest } = payload;
+    return this.request("PUT", `/api/templates/${templateId}`, {
+      json: {
+        ...rest,
+        ...(isDefault !== undefined ? { is_default: isDefault } : {}),
+      },
+    });
   }
 
   async deleteTemplate(templateId: number): Promise<Record<string, JsonValue>> {
