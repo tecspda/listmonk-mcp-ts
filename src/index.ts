@@ -75,17 +75,42 @@ function pickData(result: unknown): Record<string, unknown> {
   return {} as Record<string, unknown>;
 }
 
+/**
+ * Разбирает списочный ответ Listmonk.
+ * Разные эндпоинты возвращают `data` по-разному:
+ *  - с пагинацией: { data: { results: [...], total, per_page, page } } — subscribers, campaigns, lists, media;
+ *  - плоским массивом: { data: [...] } — templates.
+ * Функция поддерживает оба варианта, а также вложенный массив в единственном поле объекта.
+ */
 function parseListResult(value: unknown): unknown[] {
   const data = pickData(value);
-  if (Array.isArray(data.results)) {
-    return (data as Record<string, unknown>).results as unknown[];
+  if (Array.isArray(data)) {
+    return data as unknown[];
   }
 
-  if (Array.isArray(data)) {
-    return data;
+  if (Array.isArray(data.results)) {
+    return data.results as unknown[];
+  }
+
+  const values = Object.values(data);
+  if (values.length === 1 && Array.isArray(values[0])) {
+    return values[0] as unknown[];
   }
 
   return [];
+}
+
+/**
+ * Возвращает общее число элементов: поле `total` при пагинации,
+ * либо длину массива, если Listmonk вернул плоский список.
+ */
+function parseListTotal(value: unknown, items: unknown[]): number {
+  const data = pickData(value);
+  if (!Array.isArray(data) && typeof data.total === "number") {
+    return data.total;
+  }
+
+  return items.length;
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -209,11 +234,8 @@ server.tool(
   async ({ page, per_page, query }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getSubscribers(page, per_page, "created_at", "desc", query);
-      const data = pickData(result);
-      const subscribers = Array.isArray((data as Record<string, unknown>).results)
-        ? (data as Record<string, unknown>).results as unknown[]
-        : [];
-      const total = Number((data as Record<string, unknown>).total || 0);
+      const subscribers = parseListResult(result);
+      const total = parseListTotal(result, subscribers);
 
       if (subscribers.length === 0) {
         return "No subscribers found.";
@@ -389,9 +411,8 @@ server.tool(
   async ({ list_id, page, per_page }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getListSubscribers(list_id, page, per_page);
-      const data = pickData(result);
-      const subscribers = Array.isArray(data.results) ? (data.results as unknown[]) : [];
-      const total = Number(data.total || 0);
+      const subscribers = parseListResult(result);
+      const total = parseListTotal(result, subscribers);
 
       return `Successfully retrieved ${subscribers.length} subscribers for list ${list_id} (Total: ${total}, Page: ${page})`;
     }),
@@ -454,9 +475,8 @@ server.tool(
   async ({ status, page, per_page }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getCampaigns(page, per_page, status);
-      const data = pickData(result);
-      const campaigns = Array.isArray(data.results) ? data.results as unknown[] : [];
-      const total = Number(data.total || 0);
+      const campaigns = parseListResult(result);
+      const total = parseListTotal(result, campaigns);
 
       if (campaigns.length === 0) return "No campaigns found.";
 
@@ -627,9 +647,8 @@ server.tool(
   async (): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getCampaigns(1, 50);
-      const data = pickData(result);
-      const campaigns = Array.isArray(data.results) ? (data.results as unknown[]) : [];
-      const total = Number(data.total || 0);
+      const campaigns = parseListResult(result);
+      const total = parseListTotal(result, campaigns);
       if (campaigns.length === 0) {
         return "No campaigns found.";
       }
@@ -654,8 +673,7 @@ server.tool(
   async (): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getTemplates();
-      const data = pickData(result);
-      const templates = Array.isArray(data.results) ? (data.results as unknown[]) : [];
+      const templates = parseListResult(result);
       if (templates.length === 0) return "No templates found.";
 
       const lines = templates.map((value) => {
@@ -851,21 +869,7 @@ server.tool(
   async (): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getMedia();
-      const payload = pickData(result);
-      let mediaItems: unknown[] = [];
-
-      if (Array.isArray(payload)) {
-        mediaItems = payload as unknown[];
-      } else if (typeof payload === "object" && Array.isArray((payload as Record<string, unknown>).results)) {
-        mediaItems = (payload as Record<string, unknown>).results as unknown[];
-      } else if (typeof payload === "object") {
-        const values = Object.values(payload);
-        if (values.length > 0 && Array.isArray(values[0])) {
-          mediaItems = values[0] as unknown[];
-        } else if (Array.isArray(values)) {
-          mediaItems = values;
-        }
-      }
+      const mediaItems = parseListResult(result);
 
       if (mediaItems.length === 0) {
         return "No media files found.";
@@ -891,14 +895,7 @@ server.tool(
   async (): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getMedia();
-      const payload = pickData(result);
-      let mediaItems: unknown[] = [];
-
-      if (Array.isArray(payload)) {
-        mediaItems = payload as unknown[];
-      } else if (typeof payload === "object" && Array.isArray((payload as Record<string, unknown>).results)) {
-        mediaItems = (payload as Record<string, unknown>).results as unknown[];
-      }
+      const mediaItems = parseListResult(result);
 
       if (!mediaItems.length) {
         return "# Media Files\n\nNo media files found.";
