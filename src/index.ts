@@ -857,7 +857,6 @@ server.tool(
 
 (async () => {
   try {
-    await client.healthCheck();
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error(`listmonk-mcp-ts started: ${config.url}`);
@@ -865,4 +864,9 @@ server.tool(
     console.error(formatError(error));
     process.exit(1);
   }
+
+  // Недоступный Listmonk не мешает старту: клиент видит инструменты, ошибку покажет check_listmonk_health
+  client.healthCheck().catch((error) => {
+    console.error(`Warning: Listmonk is not reachable: ${formatError(error)}`);
+  });
 })();
