@@ -1,67 +1,31 @@
-# Windsurf & Cursor Setup
+# Cursor and Windsurf Setup
 
-Add the Listmonk MCP server to Windsurf or Cursor IDEs.
-
-## Windsurf Configuration
-
-Add to your Windsurf MCP settings:
+1. Install [Bun](https://bun.sh) 1.1 or newer: `curl -fsSL https://bun.sh/install | bash`.
+2. Create an API user in Listmonk (*Users* → new user of type *API*) and copy its token.
+3. Open the MCP config file:
+   - **Cursor:** `~/.cursor/mcp.json` for all projects, or `.cursor/mcp.json` in a project.
+   - **Windsurf:** `~/.codeium/windsurf/mcp_config.json`, or *Settings* → *Cascade* → *MCP Servers* → *View raw config*.
+4. Add the server. The format is the same for both editors:
 
 ```json
 {
   "mcpServers": {
     "listmonk": {
-      "command": "bun",
-      "args": ["run", "src/index.ts"],
+      "command": "bunx",
+      "args": ["listmonk-mcp-ts"],
       "env": {
-        "LISTMONK_MCP_URL": "http://localhost:9000",
-        "LISTMONK_MCP_USERNAME": "your-api-username",
-        "LISTMONK_MCP_PASSWORD": "your-api-token"
+        "LISTMONK_MCP_URL": "https://listmonk.example.com",
+        "LISTMONK_MCP_USERNAME": "api_user",
+        "LISTMONK_MCP_PASSWORD": "your-api-token",
+        "LISTMONK_MCP_FILES_DIR": "/path/to/email-templates"
       }
     }
   }
 }
 ```
 
-## Cursor Configuration
+5. Reload the MCP servers in the editor settings, or restart the editor.
 
-Add to your Cursor MCP settings:
+Do not put a project-level config with a real token into git. Use the global file for the token instead.
 
-```json
-{
-  "mcpServers": {
-    "listmonk": {
-      "command": "bun",
-      "args": ["run", "src/index.ts"],
-      "env": {
-        "LISTMONK_MCP_URL": "http://localhost:9000",
-        "LISTMONK_MCP_USERNAME": "your-api-username",
-        "LISTMONK_MCP_PASSWORD": "your-api-token"
-      }
-    }
-  }
-}
-```
-
-## Environment Variables
-
-- `LISTMONK_MCP_URL`: Your Listmonk server URL
-- `LISTMONK_MCP_USERNAME`: API user created in Admin → Users
-- `LISTMONK_MCP_PASSWORD`: API token (not user password)
-
-## Prerequisites
-
-1. **Install Bun**:
-   ```bash
-   curl -fsSL https://bun.sh/install | bash
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   bun install
-   ```
-
-3. **Create API user and token** in Listmonk admin interface:
-   - Go to Admin → Users in your Listmonk instance
-   - Create a new API user and token
-
-3. **Restart your IDE** after adding configuration
+`LISTMONK_MCP_FILES_DIR` is optional: without it the file tools are disabled. All variables are described in the [main README](../README.md#configuration).

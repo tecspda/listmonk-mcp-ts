@@ -1,53 +1,31 @@
 # Claude Desktop Setup
 
-Add the Listmonk MCP server to Claude Desktop.
-
-## Configuration
-
-Edit your Claude Desktop config file:
-
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`  
-**Linux:** `~/.config/Claude/claude_desktop_config.json`
-
-Add the server configuration:
+1. Install [Bun](https://bun.sh) 1.1 or newer: `curl -fsSL https://bun.sh/install | bash`.
+2. Create an API user in Listmonk (*Users* → new user of type *API*) and copy its token.
+3. Open the Claude Desktop config file (*Settings* → *Developer* → *Edit Config*):
+   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+4. Add the server:
 
 ```json
 {
   "mcpServers": {
     "listmonk": {
-      "command": "bun",
-      "args": ["run", "src/index.ts"],
+      "command": "bunx",
+      "args": ["listmonk-mcp-ts"],
       "env": {
-        "LISTMONK_MCP_URL": "http://localhost:9000",
-        "LISTMONK_MCP_USERNAME": "your-api-username",
-        "LISTMONK_MCP_PASSWORD": "your-api-token"
+        "LISTMONK_MCP_URL": "https://listmonk.example.com",
+        "LISTMONK_MCP_USERNAME": "api_user",
+        "LISTMONK_MCP_PASSWORD": "your-api-token",
+        "LISTMONK_MCP_FILES_DIR": "/path/to/email-templates"
       }
     }
   }
 }
 ```
 
-## Environment Variables
+5. Restart Claude Desktop.
 
-- `LISTMONK_MCP_URL`: Your Listmonk server URL
-- `LISTMONK_MCP_USERNAME`: API user created in Admin → Users  
-- `LISTMONK_MCP_PASSWORD`: API token (not user password)
+If Claude Desktop cannot find `bunx`, use the full path from `which bunx` (for example `/Users/you/.bun/bin/bunx`) as `command`.
 
-## Prerequisites
-
-1. **Install Bun**:
-   ```bash
-   curl -fsSL https://bun.sh/install | bash
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   bun install
-   ```
-
-3. **Create API user and token** in Listmonk admin interface:
-   - Go to Admin → Users in your Listmonk instance
-   - Create a new API user and token
-
-3. **Restart Claude Desktop** after adding configuration
+`LISTMONK_MCP_FILES_DIR` is optional: without it the file tools are disabled. All variables are described in the [main README](../README.md#configuration).

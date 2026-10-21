@@ -1,49 +1,38 @@
 # VS Code Setup
 
-Add the Listmonk MCP server to your VS Code settings.
+For the built-in MCP support in VS Code (GitHub Copilot agent mode).
 
-## Configuration
-
-Add to your `~/.config/Code/User/settings.json`:
+1. Install [Bun](https://bun.sh) 1.1 or newer: `curl -fsSL https://bun.sh/install | bash`.
+2. Create an API user in Listmonk (*Users* → new user of type *API*) and copy its token.
+3. Open the MCP config: `.vscode/mcp.json` for one project, or the command *MCP: Open User Configuration* for all projects.
+4. Add the server. VS Code asks for the token once and keeps it in its secret storage, so the token is not written to the file:
 
 ```json
 {
-  "mcp": {
-    "servers": {
-      "listmonk": {
-        "command": "bun",
-        "args": ["run", "src/index.ts"],
-        "env": {
-          "LISTMONK_MCP_URL": "http://localhost:9000",
-          "LISTMONK_MCP_USERNAME": "your-api-username",
-          "LISTMONK_MCP_PASSWORD": "your-api-token"
-        }
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "listmonk-token",
+      "description": "Listmonk API token",
+      "password": true
+    }
+  ],
+  "servers": {
+    "listmonk": {
+      "type": "stdio",
+      "command": "bunx",
+      "args": ["listmonk-mcp-ts"],
+      "env": {
+        "LISTMONK_MCP_URL": "https://listmonk.example.com",
+        "LISTMONK_MCP_USERNAME": "api_user",
+        "LISTMONK_MCP_PASSWORD": "${input:listmonk-token}",
+        "LISTMONK_MCP_FILES_DIR": "/path/to/email-templates"
       }
     }
   }
 }
 ```
 
-## Environment Variables
+5. Start the server from the *Start* link above it in `mcp.json`, or from the tools list in Copilot Chat.
 
-- `LISTMONK_MCP_URL`: Your Listmonk server URL
-- `LISTMONK_MCP_USERNAME`: API user created in Admin → Users
-- `LISTMONK_MCP_PASSWORD`: API token (not user password)
-
-## Prerequisites
-
-1. **Install Bun**:
-   ```bash
-   curl -fsSL https://bun.sh/install | bash
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   bun install
-   ```
-
-3. **Create API user and token** in Listmonk admin interface:
-   - Go to Admin → Users in your Listmonk instance
-   - Create a new API user and token
-
-3. **Restart VS Code** after adding configuration
+`LISTMONK_MCP_FILES_DIR` is optional: without it the file tools are disabled. All variables are described in the [main README](../README.md#configuration).
