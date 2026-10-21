@@ -26,6 +26,11 @@ Written in TypeScript, runs on [Bun](https://bun.sh).
 
 ## Quick start
 
+One-click install (then replace the placeholder URL, user and token in the client's MCP settings):
+
+[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=listmonk&config=eyJjb21tYW5kIjoiYnVueCIsImFyZ3MiOlsibGlzdG1vbmstbWNwLXRzIl0sImVudiI6eyJMSVNUTU9OS19NQ1BfVVJMIjoiaHR0cHM6Ly9saXN0bW9uay5leGFtcGxlLmNvbSIsIkxJU1RNT05LX01DUF9VU0VSTkFNRSI6ImFwaV91c2VyIiwiTElTVE1PTktfTUNQX1BBU1NXT1JEIjoieW91ci1hcGktdG9rZW4ifX0%3D)
+[![Install in VS Code](https://img.shields.io/badge/Install_in-VS_Code-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=listmonk&config=%7B%22command%22%3A%22bunx%22%2C%22args%22%3A%5B%22listmonk-mcp-ts%22%5D%2C%22env%22%3A%7B%22LISTMONK_MCP_URL%22%3A%22https%3A//listmonk.example.com%22%2C%22LISTMONK_MCP_USERNAME%22%3A%22api_user%22%2C%22LISTMONK_MCP_PASSWORD%22%3A%22your-api-token%22%7D%7D)
+
 ### Claude Code
 
 ```bash
