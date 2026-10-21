@@ -1,0 +1,46 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.tecspda/listmonk-mcp-ts",
+  "title": "Listmonk MCP",
+  "description": "MCP server for Listmonk: manage subscribers, lists, campaigns, templates and media, send transactional email.",
+  "repository": {
+    "url": "https://github.com/tecspda/listmonk-mcp-ts",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "listmonk-mcp-ts",
+      "version": "0.1.0",
+      "runtimeHint": "bunx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "LISTMONK_MCP_URL",
+          "description": "Listmonk base URL, e.g. https://listmonk.example.com",
+          "isRequired": true
+        },
+        {
+          "name": "LISTMONK_MCP_USERNAME",
+          "description": "Listmonk API user name",
+          "isRequired": true
+        },
+        {
+          "name": "LISTMONK_MCP_PASSWORD",
+          "description": "Listmonk API user password or token",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "LISTMONK_MCP_FILES_DIR",
+          "description": "Directory the file tools (*_from_file, upload_media_file) may read from; they are disabled when unset",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

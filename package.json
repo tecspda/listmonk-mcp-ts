@@ -1,13 +1,40 @@
 {
   "name": "listmonk-mcp-ts",
   "version": "0.1.0",
+  "mcpName": "io.github.tecspda/listmonk-mcp-ts",
   "description": "Listmonk MCP server for Bun, TypeScript implementation",
-  "private": true,
+  "license": "MIT",
   "type": "module",
+  "bin": {
+    "listmonk-mcp-ts": "src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "README.ru.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tecspda/listmonk-mcp-ts.git"
+  },
+  "homepage": "https://github.com/tecspda/listmonk-mcp-ts#readme",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "listmonk",
+    "email",
+    "newsletter",
+    "bun"
+  ],
+  "engines": {
+    "bun": ">=1.1.0"
+  },
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun run --watch src/index.ts",
-    "check": "bun exec tsc"
+    "check": "bun exec tsc",
+    "test": "bun test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.3",

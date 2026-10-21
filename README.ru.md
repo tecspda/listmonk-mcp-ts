@@ -26,7 +26,6 @@ bun run start -- --config /path/to/.env
 
 Параметры CLI:
 - `-c, --config` — путь к env-файлу
-- `-d, --debug` — включить debug-режим
 - `-v, --version` — вывести версию сервера
 
 ## Шаблоны из файла
@@ -40,6 +39,10 @@ bun run start -- --config /path/to/.env
 Файл по пути `file_path` читается как UTF-8 и используется как тело шаблона дословно —
 сохранённый шаблон байт-в-байт совпадает с исходным файлом (без искажений при переносе).
 Поле `subject` обязательно для `tx`-шаблонов (транзакционных).
+
+Файловые инструменты (эти два и `upload_media_file`) читают файлы только внутри
+`LISTMONK_MCP_FILES_DIR` и отключены, если переменная не задана. Так prompt injection
+в данных Listmonk не заставит агента прочитать `~/.ssh` или `.env` и отправить их письмом.
 
 ## Пример конфигурации MCP
 
@@ -62,6 +65,5 @@ bun run start -- --config /path/to/.env
 - `LISTMONK_MCP_USERNAME` — имя API-пользователя (обязательно)
 - `LISTMONK_MCP_PASSWORD` — API-токен (обязательно)
 - `LISTMONK_MCP_TIMEOUT` — таймаут HTTP в секундах
-- `LISTMONK_MCP_MAX_RETRIES` — количество повторов при сетевых ошибках
-- `LISTMONK_MCP_DEBUG` — включить отладку (`true`/`false`)
-- `LISTMONK_MCP_LOG_LEVEL` — уровень логирования
+- `LISTMONK_MCP_MAX_RETRIES` — количество повторов при сетевых ошибках (только для GET-запросов)
+- `LISTMONK_MCP_FILES_DIR` — каталог, из которого файловые инструменты могут читать файлы (без него они отключены)

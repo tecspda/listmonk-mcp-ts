@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { config as loadDotEnv } from "dotenv";
 
 export interface ListmonkConfig {
@@ -6,9 +7,9 @@ export interface ListmonkConfig {
   password: string;
   timeout: number;
   maxRetries: number;
-  debug: boolean;
-  logLevel: string;
   serverName: string;
+  // Каталог, из которого разрешено читать файлы; без него файловые инструменты отключены
+  filesDir?: string;
 }
 
 function parseNumber(value: string | undefined, fallback: number): number {
@@ -22,29 +23,6 @@ function parseNumber(value: string | undefined, fallback: number): number {
   }
 
   return parsed;
-}
-
-function parseBoolean(value: string | undefined, fallback: boolean): boolean {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  const normalized = value.trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(normalized)) {
-    return true;
-  }
-
-  if (["0", "false", "no", "off"].includes(normalized)) {
-    return false;
-  }
-
-  return fallback;
-}
-
-function normalizeLogLevel(value: string | undefined): string {
-  const level = value?.trim()?.toUpperCase() ?? "INFO";
-  const allowed = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"];
-  return allowed.includes(level) ? level : "INFO";
 }
 
 function validateUrl(url: string): string {
@@ -68,6 +46,7 @@ export function loadConfig(envFile?: string): ListmonkConfig {
   const url = validateUrl(process.env.LISTMONK_MCP_URL?.trim() || "");
   const username = process.env.LISTMONK_MCP_USERNAME?.trim() || "";
   const password = process.env.LISTMONK_MCP_PASSWORD?.trim() || "";
+  const filesDir = process.env.LISTMONK_MCP_FILES_DIR?.trim();
 
   if (!url) {
     throw new Error("LISTMONK_MCP_URL is required");
@@ -87,8 +66,8 @@ export function loadConfig(envFile?: string): ListmonkConfig {
     password,
     timeout: parseNumber(process.env.LISTMONK_MCP_TIMEOUT, 30),
     maxRetries: parseNumber(process.env.LISTMONK_MCP_MAX_RETRIES, 3),
-    debug: parseBoolean(process.env.LISTMONK_MCP_DEBUG, false),
-    logLevel: normalizeLogLevel(process.env.LISTMONK_MCP_LOG_LEVEL),
     serverName: process.env.LISTMONK_MCP_SERVER_NAME?.trim() || "Listmonk MCP Server",
+    // realpath, чтобы сравнение путей не обходилось через симлинки (например, /tmp → /private/tmp)
+    filesDir: filesDir ? realpathSync(filesDir) : undefined,
   };
 }

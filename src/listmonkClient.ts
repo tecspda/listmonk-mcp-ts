@@ -1,4 +1,5 @@
-import { extname } from "node:path";
+import { basename, extname } from "node:path";
+import packageJson from "../package.json";
 import { ListmonkConfig } from "./config.js";
 
 export type JsonValue =
@@ -51,7 +52,7 @@ export class ListmonkClient {
 
   private headers(contentType = true): Headers {
     const headers = new Headers();
-    headers.set("User-Agent", "Listmonk-MCP-Server-Bun/0.1.0");
+    headers.set("User-Agent", `Listmonk-MCP-Server-Bun/${packageJson.version}`);
     headers.set("Accept", "application/json");
     headers.set("Authorization", this.authorizationHeader());
     if (contentType) {
@@ -133,7 +134,8 @@ export class ListmonkClient {
         throw error;
       }
 
-      if (retryCount < this.config.maxRetries) {
+      // Повторяем только GET: POST/PUT мог уже выполниться на сервере (например, письмо ушло)
+      if (method === "GET" && retryCount < this.config.maxRetries) {
         await sleep(2 ** retryCount * 1000);
         return this.request<T>(method, endpoint, options, retryCount + 1);
       }
@@ -149,7 +151,8 @@ export class ListmonkClient {
   }
 
   async healthCheck(): Promise<Record<string, JsonValue>> {
-    return this.request<Record<string, JsonValue>>("GET", "/api/health");
+    // Без повторов: при недоступном Listmonk старт не должен висеть дольше таймаута клиента MCP
+    return this.request<Record<string, JsonValue>>("GET", "/api/health", {}, this.config.maxRetries);
   }
 
   async getSubscribers(
@@ -170,7 +173,8 @@ export class ListmonkClient {
 
   async getSubscriberByEmail(email: string): Promise<Record<string, JsonValue>> {
     const response = await this.request("GET", "/api/subscribers", {
-      params: { query: `subscribers.email = '${email}'` },
+      // Экранируем апостроф: адреса вида o'brien@example.com допустимы
+      params: { query: `subscribers.email = '${email.replace(/'/g, "''")}'` },
     });
 
     const data = response.data;
@@ -462,7 +466,7 @@ export class ListmonkClient {
 
     const binary = await file.arrayBuffer();
     const formData = new FormData();
-    formData.append("file", new Blob([binary], { type: contentTypes[extension] || "application/octet-stream" }), file.name);
+    formData.append("file", new Blob([binary], { type: contentTypes[extension] || "application/octet-stream" }), basename(path));
 
     if (title) {
       formData.append("title", title);
