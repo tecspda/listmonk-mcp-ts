@@ -1,6 +1,6 @@
 {
   "name": "listmonk-mcp-ts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "mcpName": "io.github.tecspda/listmonk-mcp-ts",
   "description": "Listmonk MCP server for Bun, TypeScript implementation",
   "license": "MIT",

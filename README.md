@@ -4,6 +4,8 @@
 
 An [MCP](https://modelcontextprotocol.io) server for [Listmonk](https://listmonk.app), the self-hosted newsletter and mailing list manager. It lets AI agents (Claude Code, Claude Desktop, Cursor, Cline, VS Code and others) manage subscribers, mailing lists, campaigns, templates and media, and send transactional email through your Listmonk instance.
 
+TypeScript port of [rhnvrm/listmonk-mcp](https://github.com/rhnvrm/listmonk-mcp) by Rohan Verma, extended with file-based templates, campaign body editing and hardened file access.
+
 Written in TypeScript, runs on [Bun](https://bun.sh).
 
 [Русская версия](./README.ru.md)
