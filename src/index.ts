@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { readFile, realpath } from "node:fs/promises";
 import { resolve, sep } from "node:path";
@@ -10,6 +11,13 @@ import { JsonValue, ListmonkAPIError, ListmonkClient } from "./listmonkClient.js
 import { parseListResult, parseListTotal, pickData } from "./parse.js";
 
 const VERSION = packageJson.version;
+
+// Подсказки клиенту: что инструмент меняет, чтобы агент знал, где просить подтверждение
+const READ_ONLY: ToolAnnotations = { readOnlyHint: true };
+const CREATE: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false };
+const MODIFY: ToolAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: true };
+const BODY_EDIT: ToolAnnotations = { ...MODIFY, idempotentHint: false };
+const SEND: ToolAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: false };
 
 type ToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -93,6 +101,14 @@ function formatSubscriber(subscriber: Record<string, unknown>): string {
   ].join("\n");
 }
 
+function formatSubscriberLine(subscriber: unknown): string {
+  const s = subscriber as Record<string, unknown>;
+  const lists = Array.isArray(s.lists)
+    ? s.lists.map((value) => (value as Record<string, unknown>).name || "").join(", ")
+    : "";
+  return `- **${s.name}** (${s.email}) - ID: ${s.id} - Status: ${s.status} - Lists: ${lists}`;
+}
+
 const args = parseArgs(process.argv.slice(2));
 
 if (args.version) {
@@ -140,7 +156,12 @@ const server = new McpServer({
 });
 
 // Health check
-server.tool("check_listmonk_health", "Check if Listmonk server is healthy and accessible", {}, async (): Promise<ToolResult> =>
+server.tool(
+  "check_listmonk_health",
+  "Check that the Listmonk server is reachable and responding, and return its health data. Makes a single request with no retries. Use it first when other tools fail with connection errors.",
+  {},
+  READ_ONLY,
+  async (): Promise<ToolResult> =>
   safeResponse(async () => {
     const healthData = await client.healthCheck();
     return `Listmonk server is healthy at ${config.url}. Health data: ${JSON.stringify(healthData)}`;
@@ -150,15 +171,16 @@ server.tool("check_listmonk_health", "Check if Listmonk server is healthy and ac
 // Subscriber tools
 server.tool(
   "add_subscriber",
-  "Add a new subscriber to Listmonk",
+  "Create a new subscriber and optionally subscribe them to mailing lists. Fails if a subscriber with the same email already exists. Returns the new subscriber ID. To change an existing subscriber use update_subscriber.",
   {
     email: z.string().email().describe("Subscriber email"),
     name: z.string().describe("Subscriber name"),
-    lists: z.array(z.number()).default([]).describe("Mailing list IDs"),
-    status: z.string().default("enabled").describe("Subscriber status (enabled, disabled, blocklisted)"),
-    attributes: z.record(z.unknown()).optional().describe("Custom subscriber attributes"),
-    preconfirm: z.boolean().default(false).describe("Whether to preconfirm subscriptions"),
+    lists: z.array(z.number()).default([]).describe("IDs of the mailing lists to subscribe them to (see get_mailing_lists); empty means no lists"),
+    status: z.string().default("enabled").describe("enabled (can receive mail), disabled, or blocklisted (never mailed)"),
+    attributes: z.record(z.unknown()).optional().describe("Free-form JSON object stored with the subscriber, e.g. {\"city\": \"Berlin\"}"),
+    preconfirm: z.boolean().default(false).describe("If true, subscriptions to double opt-in lists are marked confirmed and no confirmation email is sent"),
   },
+  CREATE,
   async ({ email, name, lists, status, attributes, preconfirm }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.createSubscriber(
@@ -177,15 +199,16 @@ server.tool(
 
 server.tool(
   "update_subscriber",
-  "Update an existing subscriber",
+  "Update an existing subscriber's email, name, status, list memberships or attributes. Only the fields you provide are sent to Listmonk. When `lists` or `attributes` is provided it is sent as the full new value, not merged with the old one. To only change status use change_subscriber_status.",
   {
     subscriber_id: z.number().positive().describe("Subscriber ID"),
     email: z.string().email().optional().describe("New email"),
     name: z.string().optional().describe("New name"),
-    status: z.string().optional().describe("New status"),
-    lists: z.array(z.number()).optional().describe("New list IDs"),
-    attributes: z.record(z.unknown()).optional().describe("New subscriber attributes"),
+    status: z.string().optional().describe("New status: enabled, disabled or blocklisted"),
+    lists: z.array(z.number()).optional().describe("Full new set of mailing list IDs; replaces the current memberships"),
+    attributes: z.record(z.unknown()).optional().describe("Full new attributes object; replaces the current attributes"),
   },
+  MODIFY,
   async ({ subscriber_id, email, name, status, lists, attributes }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.updateSubscriber(subscriber_id, {
@@ -201,8 +224,9 @@ server.tool(
 
 server.tool(
   "remove_subscriber",
-  "Remove a subscriber from Listmonk",
+  "Permanently delete a subscriber and all their list subscriptions. This cannot be undone. To stop mailing someone but keep their record, use change_subscriber_status with 'blocklisted' instead.",
   { subscriber_id: z.number().positive().describe("Subscriber ID") },
+  MODIFY,
   async ({ subscriber_id }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.deleteSubscriber(subscriber_id);
@@ -212,11 +236,12 @@ server.tool(
 
 server.tool(
   "change_subscriber_status",
-  "Change subscriber status",
+  "Change only a subscriber's status to enabled, disabled or blocklisted. Blocklisted subscribers are excluded from all campaigns. Use remove_subscriber to delete the record instead.",
   {
     subscriber_id: z.number().positive().describe("Subscriber ID"),
     status: z.string().describe("New status (enabled, disabled, blocklisted)"),
   },
+  MODIFY,
   async ({ subscriber_id, status }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.setSubscriberStatus(subscriber_id, status);
@@ -226,12 +251,13 @@ server.tool(
 
 server.tool(
   "list_subscribers",
-  "List all subscribers with basic info",
+  "List subscribers, newest first, one page at a time. Returns the total subscriber count and each subscriber's name, email, status and list names. Use `query` to filter with a SQL expression; use get_subscriber_by_email when you already know the address.",
   {
-    page: z.number().positive().default(1).describe("Page number"),
-    per_page: z.number().positive().default(50).describe("Items per page"),
-    query: z.string().optional().describe("Optional query string"),
+    page: z.number().positive().default(1).describe("Page number, starting at 1"),
+    per_page: z.number().positive().default(50).describe("Subscribers per page"),
+    query: z.string().optional().describe("Optional SQL condition on the subscribers table, e.g. subscribers.name LIKE '%john%' or subscribers.status = 'blocklisted'. Omit to list everyone"),
   },
+  READ_ONLY,
   async ({ page, per_page, query }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getSubscribers(page, per_page, "created_at", "desc", query);
@@ -242,30 +268,24 @@ server.tool(
         return "No subscribers found.";
       }
 
-      const lines = subscribers.map((sub) => {
-        const s = sub as Record<string, unknown>;
-        const lists = Array.isArray(s.lists)
-          ? s.lists.map((value) => (value as Record<string, unknown>).name || "").join(", ")
-          : "";
-        return `- **${s.name}** (${s.email}) - Status: ${s.status} - Lists: ${lists}`;
-      });
-
-      return `Total subscribers: ${total}\nShowing ${subscribers.length}\n\n${lines.join("\n")}`;
+      return `Total subscribers: ${total}\nShowing ${subscribers.length}\n\n${subscribers.map(formatSubscriberLine).join("\n")}`;
     }),
 );
 
 server.tool(
   "get_subscriber_by_id",
-  "Get subscriber details by ID",
+  "Get one subscriber by numeric ID: email, name, status, timestamps, list memberships and custom attributes. Returns an error if the ID does not exist. Use get_subscriber_by_email when you only know the address.",
   { subscriber_id: z.number().positive().describe("Subscriber ID") },
+  READ_ONLY,
   async ({ subscriber_id }): Promise<ToolResult> =>
     safeResponse(async () => formatSubscriber(pickData(await client.getSubscriber(subscriber_id)))),
 );
 
 server.tool(
   "get_subscriber_by_email",
-  "Get subscriber details by email",
+  "Look up one subscriber by exact email address and return the same details as get_subscriber_by_id. Returns a not-found error if no subscriber has that address.",
   { email: z.string().email().describe("Subscriber email") },
+  READ_ONLY,
   async ({ email }): Promise<ToolResult> =>
     safeResponse(async () => formatSubscriber(pickData(await client.getSubscriberByEmail(email)))),
 );
@@ -273,8 +293,9 @@ server.tool(
 // List tools
 server.tool(
   "get_mailing_lists",
-  "Get all mailing lists",
+  "List mailing lists with ID, type, subscriber count and tags. Use it to find the list IDs required by add_subscriber, create_campaign and other tools.",
   {},
+  READ_ONLY,
   async (): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getLists();
@@ -293,14 +314,15 @@ server.tool(
 
 server.tool(
   "create_mailing_list",
-  "Create a new mailing list",
+  "Create a mailing list and return its ID, which other tools use to subscribe people and target campaigns. A list is public or private and uses single or double opt-in.",
   {
     name: z.string().describe("List name"),
-    type: z.string().default("public"),
-    optin: z.string().default("single"),
-    tags: z.array(z.string()).optional(),
-    description: z.string().optional(),
+    type: z.string().default("public").describe("public (can appear on subscription forms) or private (internal only)"),
+    optin: z.string().default("single").describe("single (subscribed at once) or double (subscriber must confirm by email)"),
+    tags: z.array(z.string()).optional().describe("Labels for organising lists"),
+    description: z.string().optional().describe("Short description of the list"),
   },
+  CREATE,
   async ({ name, type, optin, tags, description }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.createList(name, type, optin, tags, description);
@@ -311,15 +333,16 @@ server.tool(
 
 server.tool(
   "update_mailing_list",
-  "Update an existing mailing list",
+  "Update a mailing list's name, type, opt-in mode, tags or description. Only the fields you provide are sent. Existing subscribers are not removed.",
   {
     list_id: z.number().positive().describe("List ID"),
     name: z.string().optional().describe("List name"),
-    type: z.string().optional().describe("List type"),
-    optin: z.string().optional().describe("Opt-in type"),
+    type: z.string().optional().describe("public or private"),
+    optin: z.string().optional().describe("single or double"),
     tags: z.array(z.string()).optional().describe("List tags"),
     description: z.string().optional().describe("List description"),
   },
+  MODIFY,
   async ({ list_id, name, type, optin, tags, description }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.updateList(list_id, { name, type, optin, tags, description });
@@ -329,8 +352,9 @@ server.tool(
 
 server.tool(
   "delete_mailing_list",
-  "Delete a mailing list",
+  "Permanently delete a mailing list and its subscriptions. The subscribers themselves are kept and only leave this list. This cannot be undone.",
   { list_id: z.number().positive().describe("List ID") },
+  MODIFY,
   async ({ list_id }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.deleteList(list_id);
@@ -340,26 +364,32 @@ server.tool(
 
 server.tool(
   "get_list_subscribers_tool",
-  "Get subscribers for a specific mailing list",
+  "List the subscribers of one mailing list, one page at a time, with name, email and status, plus the list's total subscriber count. Use get_mailing_lists to find list IDs.",
   {
     list_id: z.number().positive().describe("List ID"),
-    page: z.number().positive().default(1),
-    per_page: z.number().positive().default(20),
+    page: z.number().positive().default(1).describe("Page number, starting at 1"),
+    per_page: z.number().positive().default(20).describe("Subscribers per page"),
   },
+  READ_ONLY,
   async ({ list_id, page, per_page }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getListSubscribers(list_id, page, per_page);
       const subscribers = parseListResult(result);
       const total = parseListTotal(result, subscribers);
 
-      return `Successfully retrieved ${subscribers.length} subscribers for list ${list_id} (Total: ${total}, Page: ${page})`;
+      if (subscribers.length === 0) {
+        return `No subscribers found for list ${list_id} (Total: ${total}, Page: ${page}).`;
+      }
+
+      return `List ${list_id}: total subscribers ${total}, showing ${subscribers.length} (page ${page})\n\n${subscribers.map(formatSubscriberLine).join("\n")}`;
     }),
 );
 
 server.tool(
   "get_list_by_id",
-  "Get mailing list details by ID",
+  "Get one mailing list by ID: name, type, opt-in mode, subscriber count, tags, description and timestamps.",
   { list_id: z.number().positive().describe("List ID") },
+  READ_ONLY,
   async ({ list_id }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getList(list_id);
@@ -382,12 +412,13 @@ server.tool(
 // Campaign tools
 server.tool(
   "get_campaigns",
-  "Get campaigns with optional status and pagination",
+  "List campaigns, one page at a time, with ID, name, status, sent/total progress and target list IDs. Optionally filter by status. Use get_campaign for one campaign's full details and body.",
   {
-    status: z.string().optional().describe("Filter by status"),
-    page: z.number().positive().default(1).describe("Page number"),
-    per_page: z.number().positive().default(20).describe("Items per page"),
+    status: z.string().optional().describe("Only campaigns with this status: draft, scheduled, running, paused, cancelled or finished. Omit for all"),
+    page: z.number().positive().default(1).describe("Page number, starting at 1"),
+    per_page: z.number().positive().default(20).describe("Campaigns per page"),
   },
+  READ_ONLY,
   async ({ status, page, per_page }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getCampaigns(page, per_page, status);
@@ -410,8 +441,9 @@ server.tool(
 
 server.tool(
   "get_campaign",
-  "Get detailed campaign by ID",
+  "Get one campaign by ID: name, subject, status, type, template, target lists, send progress, view and click counts, and the full body (which can be large).",
   { campaign_id: z.number().positive().describe("Campaign ID") },
+  READ_ONLY,
   async ({ campaign_id }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getCampaign(campaign_id);
@@ -441,8 +473,9 @@ server.tool(
 
 server.tool(
   "get_campaign_preview",
-  "Get campaign HTML preview",
+  "Render a preview of the campaign as the HTML subscribers would see. Read-only: nothing is sent. Use it to check a campaign before send_campaign or schedule_campaign.",
   { campaign_id: z.number().positive().describe("Campaign ID") },
+  READ_ONLY,
   async ({ campaign_id }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getCampaignPreview(campaign_id);
@@ -459,17 +492,18 @@ server.tool(
 
 server.tool(
   "create_campaign",
-  "Create a new campaign",
+  "Create a campaign in draft status; nothing is sent yet. `body` is the message content and `template_id` selects the layout template that wraps it. Returns the new campaign ID. Next, review it with get_campaign_preview, then start it with send_campaign or schedule_campaign.",
   {
     name: z.string().describe("Campaign name"),
     subject: z.string().describe("Email subject"),
-    lists: z.array(z.number().positive()).min(1).describe("List IDs"),
-    type: z.string().default("regular"),
-    content_type: z.string().default("richtext"),
-    body: z.string().optional().describe("Campaign body"),
-    template_id: z.number().positive().optional().describe("Template ID"),
-    tags: z.array(z.string()).optional().describe("Campaign tags"),
+    lists: z.array(z.number().positive()).min(1).describe("IDs of the mailing lists to send to, at least one (see get_mailing_lists)"),
+    type: z.string().default("regular").describe("regular (normal campaign) or optin (asks subscribers to confirm a double opt-in subscription)"),
+    content_type: z.string().default("richtext").describe("Format of body: richtext, html, markdown or plain"),
+    body: z.string().optional().describe("Message content in the chosen content_type; can also be added later with update_campaign"),
+    template_id: z.number().positive().optional().describe("Layout template that wraps the body (see get_templates); omit to use the default campaign template"),
+    tags: z.array(z.string()).optional().describe("Labels for organising campaigns"),
   },
+  CREATE,
   async ({ name, subject, lists, type, content_type, body, template_id, tags }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.createCampaign({
@@ -489,15 +523,16 @@ server.tool(
 
 server.tool(
   "update_campaign",
-  "Update existing campaign",
+  "Update a campaign's name, subject, target lists, body or tags. Only the fields you provide are sent, and the target lists are kept if you omit `lists`. Use it before sending, because Listmonk may reject edits once a campaign is running. Does not send anything.",
   {
     campaign_id: z.number().positive().describe("Campaign ID"),
     name: z.string().optional().describe("Campaign name"),
-    subject: z.string().optional().describe("Subject"),
-    lists: z.array(z.number().positive()).optional().describe("List IDs"),
-    body: z.string().optional().describe("Body"),
+    subject: z.string().optional().describe("New email subject line"),
+    lists: z.array(z.number().positive()).optional().describe("Full new set of target list IDs; omit to keep the current lists"),
+    body: z.string().optional().describe("New message content; replaces the whole current body"),
     tags: z.array(z.string()).optional().describe("Tags"),
   },
+  MODIFY,
   async ({ campaign_id, name, subject, lists, body, tags }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.updateCampaign(campaign_id, { name, subject, lists, body, tags });
@@ -507,22 +542,24 @@ server.tool(
 
 server.tool(
   "send_campaign",
-  "Send campaign immediately",
+  "Start sending a campaign to its target lists right now by setting its status to running. This emails real subscribers and cannot be undone, so check get_campaign_preview first. It returns as soon as sending starts and delivery continues in the background; follow progress with get_campaign. To send later use schedule_campaign.",
   { campaign_id: z.number().positive().describe("Campaign ID") },
+  SEND,
   async ({ campaign_id }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.sendCampaign(campaign_id);
-      return `Successfully sent campaign ${campaign_id}`;
+      return `Campaign ${campaign_id} is now running. Check progress with get_campaign.`;
     }),
 );
 
 server.tool(
   "schedule_campaign",
-  "Schedule campaign for a future date",
+  "Schedule a campaign to start sending automatically at a future date and time. Nothing is sent now. Use send_campaign to send immediately instead.",
   {
     campaign_id: z.number().positive().describe("Campaign ID"),
-    send_at: z.string().describe("ISO datetime string (for example: 2024-12-25T10:00:00Z)"),
+    send_at: z.string().describe("Future start time in ISO 8601 format with a timezone, e.g. 2026-12-25T10:00:00Z"),
   },
+  MODIFY,
   async ({ campaign_id, send_at }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.scheduleCampaign(campaign_id, send_at);
@@ -533,8 +570,9 @@ server.tool(
 // Template tools
 server.tool(
   "get_templates",
-  "Get all templates",
+  "List all templates (campaign layouts and transactional) with ID, name, type and default flag. Use the IDs with create_campaign, send_transactional_email or update_template.",
   {},
+  READ_ONLY,
   async (): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getTemplates();
@@ -553,8 +591,9 @@ server.tool(
 
 server.tool(
   "get_template",
-  "Get campaign or transactional template by ID",
+  "Get one template by ID: name, type (campaign or tx), default flag, subject (tx only), update time and the full HTML body, which can be large.",
   { template_id: z.number().positive().describe("Template ID") },
+  READ_ONLY,
   async ({ template_id }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getTemplate(template_id);
@@ -575,14 +614,15 @@ server.tool(
 
 server.tool(
   "create_template",
-  "Create a new template",
+  "Create a template and return its ID. Type 'campaign' is a layout that wraps campaign bodies; type 'tx' is a transactional email template that needs a subject and is sent with send_transactional_email. For large HTML bodies prefer create_template_from_file.",
   {
     name: z.string().describe("Template name"),
-    body: z.string().describe("Template HTML body"),
+    body: z.string().describe("Full template HTML. A 'campaign' template must contain {{ template \"content\" . }} where the campaign body goes"),
     type: z.string().default("campaign").describe("Template type: 'campaign' or 'tx' (transactional)"),
     is_default: z.boolean().default(false).describe("Whether this is default"),
     subject: z.string().optional().describe("Subject line (required for 'tx' transactional templates)"),
   },
+  CREATE,
   async ({ name, body, type, is_default, subject }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.createTemplate(name, body, type, is_default, subject);
@@ -593,14 +633,15 @@ server.tool(
 
 server.tool(
   "update_template",
-  "Update an existing template",
+  "Update a template's name, body, default flag or subject. Only the fields you provide are sent, and a provided `body` replaces the old one completely. For large HTML bodies prefer update_template_from_file.",
   {
     template_id: z.number().positive().describe("Template ID"),
     name: z.string().optional().describe("Template name"),
-    body: z.string().optional().describe("Template body"),
+    body: z.string().optional().describe("New full template HTML; replaces the whole current body"),
     is_default: z.boolean().optional().describe("Default template flag"),
     subject: z.string().optional().describe("Subject line (required for 'tx' transactional templates)"),
   },
+  MODIFY,
   async ({ template_id, name, body, is_default, subject }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.updateTemplate(template_id, {
@@ -615,7 +656,7 @@ server.tool(
 
 server.tool(
   "create_template_from_file",
-  "Create a new template whose HTML body is read from a local file path (avoids passing large bodies inline)",
+  "Create a template whose HTML body is read from a UTF-8 file inside LISTMONK_MCP_FILES_DIR, so large bodies such as MJML exports are stored byte for byte. Otherwise identical to create_template. Fails if LISTMONK_MCP_FILES_DIR is not set or the path is outside it.",
   {
     name: z.string().describe("Template name"),
     file_path: z.string().describe("Path to the template HTML file inside LISTMONK_MCP_FILES_DIR (absolute or relative to it)"),
@@ -623,6 +664,7 @@ server.tool(
     is_default: z.boolean().default(false).describe("Whether this is default"),
     subject: z.string().optional().describe("Subject line (required for 'tx' transactional templates)"),
   },
+  CREATE,
   async ({ name, file_path, type, is_default, subject }): Promise<ToolResult> =>
     safeResponse(async () => {
       const body = await readFile(await resolveFilePath(file_path), "utf8");
@@ -634,7 +676,7 @@ server.tool(
 
 server.tool(
   "update_template_from_file",
-  "Update an existing template, reading its HTML body from a local file path (avoids passing large bodies inline)",
+  "Update an existing template, replacing its HTML body with the contents of a UTF-8 file inside LISTMONK_MCP_FILES_DIR. Otherwise identical to update_template. Fails if LISTMONK_MCP_FILES_DIR is not set or the path is outside it.",
   {
     template_id: z.number().positive().describe("Template ID"),
     file_path: z.string().describe("Path to the template HTML file inside LISTMONK_MCP_FILES_DIR (absolute or relative to it)"),
@@ -642,6 +684,7 @@ server.tool(
     is_default: z.boolean().optional().describe("Default template flag"),
     subject: z.string().optional().describe("Subject line (required for 'tx' transactional templates)"),
   },
+  MODIFY,
   async ({ template_id, file_path, name, is_default, subject }): Promise<ToolResult> =>
     safeResponse(async () => {
       const body = await readFile(await resolveFilePath(file_path), "utf8");
@@ -657,8 +700,9 @@ server.tool(
 
 server.tool(
   "delete_template",
-  "Delete a template",
+  "Permanently delete a template by ID. This cannot be undone. Check get_templates first so you do not delete one that is still needed.",
   { template_id: z.number().positive().describe("Template ID") },
+  MODIFY,
   async ({ template_id }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.deleteTemplate(template_id);
@@ -668,13 +712,14 @@ server.tool(
 
 server.tool(
   "send_transactional_email",
-  "Send transactional email by template",
+  "Send one transactional email right away, using a 'tx' template, to a subscriber that already exists in Listmonk. The email cannot be recalled. `data` fills the template variables. Create tx templates with create_template (type 'tx').",
   {
-    template_id: z.number().positive().describe("Template ID"),
-    subscriber_email: z.string().email().describe("Recipient email"),
-    data: z.record(z.unknown()).optional().describe("Template data"),
-    content_type: z.string().default("html").describe("Content type"),
+    template_id: z.number().positive().describe("ID of a template of type 'tx' (see get_templates)"),
+    subscriber_email: z.string().email().describe("Email of an existing subscriber to send to"),
+    data: z.record(z.unknown()).optional().describe("Key/value data for the template, available there as {{ .Tx.Data.<key> }}"),
+    content_type: z.string().default("html").describe("Body format: html, markdown or plain"),
   },
+  SEND,
   async ({ template_id, subscriber_email, data, content_type }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.sendTransactionalEmail(template_id, subscriber_email, data as Record<string, JsonValue> | undefined, content_type);
@@ -685,8 +730,9 @@ server.tool(
 // Media tools
 server.tool(
   "get_media_list",
-  "Get uploaded media files",
+  "List uploaded media files with ID, filename, title, size, creation date and public URL. The URL can be used in campaign and template HTML.",
   {},
+  READ_ONLY,
   async (): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getMedia();
@@ -711,11 +757,12 @@ server.tool(
 
 server.tool(
   "upload_media_file",
-  "Upload a media file",
+  "Upload a file from LISTMONK_MCP_FILES_DIR to the Listmonk media library and return its ID and public URL for use in campaign bodies. Fails if LISTMONK_MCP_FILES_DIR is not set or the path is outside it. Image types (jpg, png, gif, webp, svg) get the right MIME type; other types upload as generic binary and Listmonk may reject them.",
   {
     file_path: z.string().describe("Path to the media file inside LISTMONK_MCP_FILES_DIR (absolute or relative to it)"),
-    title: z.string().optional().describe("Title"),
+    title: z.string().optional().describe("Display title in the media library; defaults to the filename"),
   },
+  CREATE,
   async ({ file_path, title }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.uploadMedia(await resolveFilePath(file_path), title);
@@ -726,11 +773,12 @@ server.tool(
 
 server.tool(
   "rename_media",
-  "Rename media title",
+  "Change a media file's display title in the media library. The filename and public URL stay the same, so existing links keep working.",
   {
     media_id: z.number().positive().describe("Media ID"),
     new_title: z.string().describe("New media title"),
   },
+  MODIFY,
   async ({ media_id, new_title }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.updateMedia(media_id, new_title);
@@ -740,8 +788,9 @@ server.tool(
 
 server.tool(
   "delete_media_file",
-  "Delete media file",
+  "Permanently delete a media file. Campaigns or templates that still link to its URL will show a broken file. This cannot be undone.",
   { media_id: z.number().positive().describe("Media ID") },
+  MODIFY,
   async ({ media_id }): Promise<ToolResult> =>
     safeResponse(async () => {
       await client.deleteMedia(media_id);
@@ -752,12 +801,13 @@ server.tool(
 // Campaign body editing tools
 server.tool(
   "replace_in_campaign_body",
-  "Search and replace text in a campaign body",
+  "Replace every occurrence of a literal text in a campaign's body (case-sensitive, not a regex) and save the campaign. Reports how many replacements were made and changes nothing if the text is not found. For patterns use regex_replace_in_campaign_body; for several replacements in one save use batch_replace_in_campaign_body.",
   {
     campaign_id: z.number().positive().describe("Campaign ID"),
-    search: z.string().describe("Search text"),
-    replace: z.string().describe("Replacement text"),
+    search: z.string().describe("Exact text to find (case-sensitive, not a regex)"),
+    replace: z.string().describe("Text to put in place of every match; may be empty to delete"),
   },
+  BODY_EDIT,
   async ({ campaign_id, search, replace }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getCampaign(campaign_id);
@@ -780,12 +830,13 @@ server.tool(
 
 server.tool(
   "regex_replace_in_campaign_body",
-  "Regex replace in campaign body",
+  "Replace all matches of a JavaScript regular expression in a campaign's body and save the campaign. Reports how many matches were replaced and changes nothing if there is no match. An invalid pattern returns an error. For plain text use replace_in_campaign_body.",
   {
     campaign_id: z.number().positive().describe("Campaign ID"),
-    pattern: z.string().describe("Regex pattern"),
-    replace: z.string().describe("Replacement pattern"),
+    pattern: z.string().describe("JavaScript regular expression source without slashes, applied globally, e.g. https://old\\.example\\.com"),
+    replace: z.string().describe("Replacement text; may use capture groups such as $1"),
   },
+  BODY_EDIT,
   async ({ campaign_id, pattern, replace }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getCampaign(campaign_id);
@@ -810,16 +861,17 @@ server.tool(
 
 server.tool(
   "batch_replace_in_campaign_body",
-  "Batch replace in campaign body",
+  "Apply several literal search and replace pairs to a campaign's body in the given order, then save once. Later pairs see the result of earlier ones, and empty search texts are skipped. Nothing is saved if no pair matches.",
   {
     campaign_id: z.number().positive().describe("Campaign ID"),
     replacements: z.array(
       z.object({
-        search: z.string().describe("Search text"),
+        search: z.string().describe("Exact text to find"),
         replace: z.string().describe("Replacement text"),
       }),
-    ).describe("Replacement operations"),
+    ).describe("Search/replace pairs applied in order; each search is a literal, case-sensitive text"),
   },
+  BODY_EDIT,
   async ({ campaign_id, replacements }): Promise<ToolResult> =>
     safeResponse(async () => {
       const result = await client.getCampaign(campaign_id);
