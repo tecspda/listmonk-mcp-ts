@@ -431,6 +431,7 @@ export class ListmonkClient {
     subscriberEmail: string,
     data: Record<string, JsonValue> = {},
     contentType = "html",
+    fromEmail?: string,
   ): Promise<Record<string, JsonValue>> {
     return this.request("POST", "/api/tx", {
       json: {
@@ -438,6 +439,7 @@ export class ListmonkClient {
         subscriber_email: subscriberEmail,
         data,
         content_type: contentType,
+        ...(fromEmail ? { from_email: fromEmail } : {}),
       },
     });
   }

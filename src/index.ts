@@ -718,11 +718,12 @@ server.tool(
     subscriber_email: z.string().email().describe("Email of an existing subscriber to send to"),
     data: z.record(z.unknown()).optional().describe("Key/value data for the template, available there as {{ .Tx.Data.<key> }}"),
     content_type: z.string().default("html").describe("Body format: html, markdown or plain"),
+    from_email: z.string().optional().describe("Sender, e.g. 'Name <user@domain>'; omitted = Listmonk's default sender"),
   },
   SEND,
-  async ({ template_id, subscriber_email, data, content_type }): Promise<ToolResult> =>
+  async ({ template_id, subscriber_email, data, content_type, from_email }): Promise<ToolResult> =>
     safeResponse(async () => {
-      await client.sendTransactionalEmail(template_id, subscriber_email, data as Record<string, JsonValue> | undefined, content_type);
+      await client.sendTransactionalEmail(template_id, subscriber_email, data as Record<string, JsonValue> | undefined, content_type, from_email);
       return `Successfully sent transactional email to ${subscriber_email}`;
     }),
 );
